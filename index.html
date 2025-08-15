@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pixel Art Converter</title>
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#94a3b8; --accent:#22c55e; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu; background:linear-gradient(180deg,#0b1220,#0f172a); color:var(--text); }
+    .wrap{ max-width:900px; margin:24px auto; padding:16px; }
+    .card{ background:rgba(17,24,39,.85); border:1px solid rgba(255,255,255,.06); border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,.35); overflow:hidden; }
+    .head{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:rgba(255,255,255,.03); border-bottom:1px solid rgba(255,255,255,.06); }
+    .head h1{ font-size:18px; margin:0; letter-spacing:.3px; }
+    .controls{ display:grid; gap:14px; grid-template-columns:repeat(12,1fr); padding:16px; }
+    .controls > div{ grid-column: span 12; background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06); border-radius:14px; padding:12px; }
+    .controls label{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:14px; color:var(--muted); }
+    .controls input[type="range"]{ width:100%; }
+    .tog{ display:flex; align-items:center; gap:10px; }
+    .row{ display:flex; flex-wrap:wrap; gap:12px; padding:0 16px 16px; }
+    .btn{ appearance:none; border:none; padding:10px 14px; border-radius:12px; background:var(--accent); color:#0a0f1f; font-weight:700; cursor:pointer; box-shadow:0 6px 16px rgba(34,197,94,.35); }
+    .btn.alt{ background:#334155; color:#e2e8f0; box-shadow:none; }
+    .btn:disabled{ opacity:.6; pointer-events:none; }
+    .pane{ padding:16px; display:grid; gap:16px; }
+    .panel{ background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06); border-radius:16px; padding:12px; }
+    .canvas-wrap{ width:100%; overflow:auto; -webkit-overflow-scrolling:touch; }
+    canvas{ image-rendering: pixelated; image-rendering: crisp-edges; display:block; max-width:100%; height:auto; background:#0b1020; border-radius:12px; }
+    .hint{ font-size:12px; color:var(--muted); }
+    @media (min-width: 720px){
+      .controls > .col-6{ grid-column: span 6; }
+      .pane{ grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="head">
+        <h1>🎨 Pixel Art Converter</h1>
+        <div class="hint">Upload gambar → atur ukuran pixel → Download PNG</div>
+      </div>
+
+      <div class="pane">
+        <!-- Left: Inputs -->
+        <section class="panel">
+          <div style="display:grid; gap:12px;">
+            <input id="file" type="file" accept="image/*" class="btn alt" />
+            <div class="controls">
+              <div class="col-6">
+                <label>
+                  <span>Ukuran Pixel (block size)</span>
+                  <strong id="pxSizeVal">12</strong>
+                </label>
+                <input type="range" id="pxSize" min="1" max="60" step="1" value="12" />
+                <div class="hint">Semakin besar → semakin kotak.</div>
+              </div>
+
+              <div class="col-6">
+                <label>
+                  <span>Level Warna per Kanal</span>
+                  <strong id="lvlVal">6</strong>
+                </label>
+                <input type="range" id="levels" min="2" max="16" step="1" value="6" />
+                <div class="hint">Posterize (batasi jumlah warna). 2–16.</div>
+              </div>
+
+              <div class="col-6">
+                <label class="tog">
+                  <input type="checkbox" id="dither" />
+                  <span>Floyd–Steinberg Dithering</span>
+                </label>
+                <div class="hint">Bikin tekstur titik-titik biar gradasi lebih halus.</div>
+              </div>
+
+              <div class="col-6">
+                <label class="tog">
+                  <input type="checkbox" id="keepAspect" checked />
+                  <span>Jaga rasio (disarankan)</span>
+                </label>
+                <div class="hint">Matikan hanya kalau mau stretch.</div>
+              </div>
+            </div>
+
+            <div class="row">
+              <button class="btn" id="download" disabled>⬇️ Download PNG</button>
+              <button class="btn alt" id="reset">↺ Reset</button>
+            </div>
+
+            <div class="hint">Tips: untuk gaya retro, coba Ukuran Pixel 8–24, Levels 4–8, aktifkan Dithering.</div>
+          </div>
+        </section>
+
+        <!-- Right: Preview -->
+        <section class="panel">
+          <div class="canvas-wrap">
+            <canvas id="out" width="0" height="0"></canvas>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <p class="hint" style="margin:12px; text-align:center; opacity:.9;">Semua proses di HP/browser kamu. Tidak upload ke server.</p>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const fileInput = el('file');
+    const pxSize = el('pxSize');
+    const pxSizeVal = el('pxSizeVal');
+    const levels = el('levels');
+    const lvlVal = el('lvlVal');
+    const dither = el('dither');
+    const keepAspect = el('keepAspect');
+    const out = el('out');
+    const dl = el('download');
+    const resetBtn = el('reset');
+
+    let img = new Image();
+    let hasImage = false;
+
+    const tiny = document.createElement('canvas');
+    const tinyCtx = tiny.getContext('2d', { willReadFrequently: true });
+    const srcCanvas = document.createElement('canvas');
+    const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
+
+    function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+    function posterizePixel(v, steps){
+      const step = 255 / (steps - 1);
+      return Math.round(v / step) * step;
+    }
+
+    function render(){
+      if(!hasImage) return;
+      const block = parseInt(pxSize.value,10);
+      const lv = parseInt(levels.value,10);
+
+      let w = Math.max(1, Math.floor(srcCanvas.width / block));
+      let h = Math.max(1, Math.floor(srcCanvas.height / block));
+      if (!keepAspect.checked){
+        w = Math.floor(srcCanvas.width / block);
+        h = Math.floor(srcCanvas.height / block);
+      }
+
+      tiny.width = w;
+      tiny.height = h;
+      tinyCtx.drawImage(srcCanvas, 0, 0, w, h);
+
+      let imageData = tinyCtx.getImageData(0, 0, w, h);
+      let data = imageData.data;
+
+      for(let i=0; i<data.length; i+=4){
+        let r = posterizePixel(data[i], lv);
+        let g = posterizePixel(data[i+1], lv);
+        let b = posterizePixel(data[i+2], lv);
+        data[i] = r; data[i+1] = g; data[i+2] = b;
+      }
+      tinyCtx.putImageData(imageData, 0, 0);
+
+      out.width = w * block;
+      out.height = h * block;
+      const ctxOut = out.getContext('2d');
+      ctxOut.imageSmoothingEnabled = false;
+      ctxOut.drawImage(tiny, 0, 0, out.width, out.height);
+
+      dl.disabled = false;
+    }
+
+    fileInput.addEventListener('change', (e)=>{
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt){
+        img.onload = function(){
+          srcCanvas.width = img.width;
+          srcCanvas.height = img.height;
+          srcCtx.drawImage(img, 0, 0);
+          hasImage = true;
+          render();
+        }
+        img.src = evt.target.result;
+      }
+      reader.readAsDataURL(file);
+    });
+
+    pxSize.addEventListener('input', ()=>{
+      pxSizeVal.textContent = pxSize.value;
+      render();
+    });
+    levels.addEventListener('input', ()=>{
+      lvlVal.textContent = levels.value;
+      render();
+    });
+    dither.addEventListener('change', render);
+    keepAspect.addEventListener('change', render);
+    resetBtn.addEventListener('click', ()=>{
+      fileInput.value = "";
+      hasImage = false;
+      dl.disabled = true;
+      out.width = 0; out.height = 0;
+    });
+
+    dl.addEventListener('click', ()=>{
+      const link = document.createElement('a');
+      link.download = 'pixel_art.png';
+      link.href = out.toDataURL();
+      link.click();
+    });
+  </script>
+</body>
+  </html>
